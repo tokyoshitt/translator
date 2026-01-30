@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Linq;
 using System.Web;
 using translator.Utils;
 
@@ -20,9 +21,10 @@ namespace translator.Handlers
             {
                 if (argCount >= 3)
                 {
-                    return Translate(args[0], args[1], args[2]);
+                    string requestId = argCount >= 4 ? args[3] : "";
+                    return Translate(args[0], args[1], args[2], requestId);
                 }
-                return "Error: Translate requires 3 arguments [text, fromLang, toLang]";
+                return "Error: Translate requires 3 arguments [text, fromLang, toLang] and optional [requestId]";
             }
             
             if (function == "SetTranslateMode")
@@ -63,13 +65,14 @@ namespace translator.Handlers
             }
         }
 
-        private static string Translate(string text, string fromLang, string toLang)
+        private static string Translate(string text, string fromLang, string toLang, string requestId)
         {
             try
             {
                 text = StringUtils.CleanParameter(text);
                 fromLang = StringUtils.CleanParameter(fromLang);
                 toLang = StringUtils.CleanParameter(toLang);
+                requestId = StringUtils.CleanParameter(requestId);
                 
                 string originalText = text; // Сохраняем оригинал для возврата при ошибке
 
@@ -82,30 +85,21 @@ namespace translator.Handlers
                         // Убираем ВСЕ управляющие символы и пробелы по краям
                         cachedTranslation = cachedTranslation.Replace("\r", "").Replace("\n", "").Replace("\t", "").Trim();
                         
-                        // Конвертируем в Unicode escape sequence
-                        StringBuilder sb = new StringBuilder();
-                        foreach (char c in cachedTranslation)
-                        {
-                            if (c > 127)
-                            {
-                                sb.AppendFormat("\\u{0:X4}", (int)c);
-                            }
-                            else
-                            {
-                                sb.Append(c);
-                            }
-                        }
+                        // Конвертируем в массив Unicode кодов для SQF
+                        int[] unicodeCodes = cachedTranslation.Select(c => (int)c).ToArray();
+                        string arrayStr = "[" + string.Join(",", unicodeCodes) + "]";
                         
-                        string result = sb.ToString();
+                        // Добавляем requestId к ответу
+                        string response = string.IsNullOrEmpty(requestId) ? arrayStr : requestId + "|" + arrayStr;
                         
                         // Режим 3: Только кэш - возвращаем сразу (НЕ через callback!)
                         if (TranslationCache.GetMode() == TranslationMode.CacheOnly)
                         {
-                            return result;
+                            return response;
                         }
                         
                         // Режим 2: Найдено в кэше - возвращаем через callback
-                        DllEntry.InvokeCallback("translator", "Translate", result);
+                        DllEntry.InvokeCallback("translator", "Translate", response);
                         return "OK";
                     }
                     
@@ -143,7 +137,7 @@ namespace translator.Handlers
                         string postData = TranslationProviders.BuildPostData(text, fromLang, toLang, provider);
                         
                         client.UploadStringCompleted += (sender, e) => {
-                            HandleApiResponse(e.Error, e.Cancelled, e.Result, provider, fromLang, toLang, originalText);
+                            HandleApiResponse(e.Error, e.Cancelled, e.Result, provider, fromLang, toLang, originalText, requestId);
                             client.Dispose();
                         };
                         
@@ -156,7 +150,7 @@ namespace translator.Handlers
                         client.Encoding = Encoding.UTF8;
                         
                         client.DownloadStringCompleted += (sender, e) => {
-                            HandleApiResponse(e.Error, e.Cancelled, e.Result, provider, fromLang, toLang, originalText);
+                            HandleApiResponse(e.Error, e.Cancelled, e.Result, provider, fromLang, toLang, originalText, requestId);
                             client.Dispose();
                         };
                         
@@ -179,7 +173,7 @@ namespace translator.Handlers
         
         // Обработка ответа от API (общий метод для GET и POST)
         private static void HandleApiResponse(Exception error, bool cancelled, string response, 
-            TranslationProvider provider, string fromLang, string toLang, string originalText)
+            TranslationProvider provider, string fromLang, string toLang, string originalText, string requestId)
         {
             try
             {
@@ -201,22 +195,15 @@ namespace translator.Handlers
                             // Сохраняем в кэш
                             TranslationCache.SaveTranslation(fromLang, toLang, originalText, translated);
                             
-                            // Конвертируем каждый символ в Unicode escape sequence
-                            StringBuilder sb = new StringBuilder();
-                            foreach (char c in translated)
-                            {
-                                if (c > 127) // Не-ASCII символы
-                                {
-                                    sb.AppendFormat("\\u{0:X4}", (int)c);
-                                }
-                                else
-                                {
-                                    sb.Append(c);
-                                }
-                            }
+                            // Конвертируем в массив Unicode кодов для SQF
+                            int[] unicodeCodes = translated.Select(c => (int)c).ToArray();
+                            string arrayStr = "[" + string.Join(",", unicodeCodes) + "]";
+                            
+                            // Добавляем requestId к ответу
+                            string result = string.IsNullOrEmpty(requestId) ? arrayStr : requestId + "|" + arrayStr;
                             
                             // Вызываем callback с результатом
-                            DllEntry.InvokeCallback("translator", "Translate", sb.ToString());
+                            DllEntry.InvokeCallback("translator", "Translate", result);
                             return;
                         }
                     }
@@ -224,13 +211,15 @@ namespace translator.Handlers
                 
                 // Если что-то пошло не так - возвращаем оригинал
                 Logger.WriteLog($"Translation failed, returning original text");
-                DllEntry.InvokeCallback("translator", "Translate", originalText);
+                string fallback = string.IsNullOrEmpty(requestId) ? originalText : requestId + "|" + originalText;
+                DllEntry.InvokeCallback("translator", "Translate", fallback);
             }
             catch (Exception ex)
             {
                 Logger.WriteLog($"HandleApiResponse error: {ex.Message}");
                 // При ошибке возвращаем оригинал
-                DllEntry.InvokeCallback("translator", "Translate", originalText);
+                string fallback = string.IsNullOrEmpty(requestId) ? originalText : requestId + "|" + originalText;
+                DllEntry.InvokeCallback("translator", "Translate", fallback);
             }
         }
     }

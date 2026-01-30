@@ -1,5 +1,3 @@
-Arma 3 Translator
-
 ## Installation
 
 1. Place `translator.dll` or `translator_x64.dll` next to Arma 3 executable
@@ -11,7 +9,10 @@ Arma 3 Translator
 ## Usage
 
 ```sqf
-"translator" callExtension ["Translate", ["Hello world", "en", "ru"]];
+["Hello world", "en", "ru", {
+    params ["_translated"];
+    systemChat _translated;
+}] call fnc_translate;
 ```
 
 ## Configuration

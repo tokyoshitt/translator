@@ -1,3 +1,5 @@
+Arma 3 Translator
+
 ## Installation
 
 1. Place `translator.dll` or `translator_x64.dll` next to Arma 3 executable

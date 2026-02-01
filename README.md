@@ -9,7 +9,10 @@
 ## Usage
 
 ```sqf
-"translator" callExtension ["Translate", ["Hello world", "en", "ru"]];
+["Hello world", "en", "ru", {
+    params ["_translated"];
+    systemChat _translated;
+}] call fnc_translate;
 ```
 
 ## Configuration

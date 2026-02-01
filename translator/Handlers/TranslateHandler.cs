@@ -10,9 +10,13 @@ namespace translator.Handlers
 {
     public static class TranslateHandler
     {
+        // Хранилище результатов для polling (серверный режим)
+        private static System.Collections.Generic.Dictionary<string, string> pendingResults = 
+            new System.Collections.Generic.Dictionary<string, string>();
+        
         public static bool CanHandle(string function)
         {
-            return function == "Translate" || function == "SetTranslateMode" || function == "GetCacheInfo";
+            return function == "Translate" || function == "SetTranslateMode" || function == "GetCacheInfo" || function == "GetResult";
         }
 
         public static string Handle(string function, string[] args, int argCount)
@@ -41,6 +45,15 @@ namespace translator.Handlers
                 return TranslationCache.GetInfo();
             }
             
+            if (function == "GetResult")
+            {
+                if (argCount >= 1)
+                {
+                    return GetResult(args[0]);
+                }
+                return "Error: GetResult requires 1 argument [requestId]";
+            }
+            
             return "Unknown function";
         }
 
@@ -62,6 +75,32 @@ namespace translator.Handlers
             catch (Exception ex)
             {
                 return "ERROR: " + ex.Message;
+            }
+        }
+        
+        // Получить результат перевода по requestId (для серверного polling)
+        private static string GetResult(string requestId)
+        {
+            try
+            {
+                requestId = StringUtils.CleanParameter(requestId);
+                
+                lock (pendingResults)
+                {
+                    if (pendingResults.ContainsKey(requestId))
+                    {
+                        string result = pendingResults[requestId];
+                        pendingResults.Remove(requestId);
+                        return result;
+                    }
+                }
+                
+                return "PENDING";
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteLog($"GetResult error: {ex.Message}");
+                return "PENDING";
             }
         }
 
@@ -202,8 +241,17 @@ namespace translator.Handlers
                             // Добавляем requestId к ответу
                             string result = string.IsNullOrEmpty(requestId) ? arrayStr : requestId + "|" + arrayStr;
                             
-                            // Вызываем callback с результатом
+                            // Пытаемся вызвать callback (для клиента)
                             DllEntry.InvokeCallback("translator", "Translate", result);
+                            
+                            // Сохраняем результат для polling (для сервера)
+                            if (!string.IsNullOrEmpty(requestId))
+                            {
+                                lock (pendingResults)
+                                {
+                                    pendingResults[requestId] = result;
+                                }
+                            }
                             return;
                         }
                     }
@@ -213,6 +261,15 @@ namespace translator.Handlers
                 Logger.WriteLog($"Translation failed, returning original text");
                 string fallback = string.IsNullOrEmpty(requestId) ? originalText : requestId + "|" + originalText;
                 DllEntry.InvokeCallback("translator", "Translate", fallback);
+                
+                // Сохраняем fallback для polling
+                if (!string.IsNullOrEmpty(requestId))
+                {
+                    lock (pendingResults)
+                    {
+                        pendingResults[requestId] = fallback;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -220,6 +277,15 @@ namespace translator.Handlers
                 // При ошибке возвращаем оригинал
                 string fallback = string.IsNullOrEmpty(requestId) ? originalText : requestId + "|" + originalText;
                 DllEntry.InvokeCallback("translator", "Translate", fallback);
+                
+                // Сохраняем fallback для polling
+                if (!string.IsNullOrEmpty(requestId))
+                {
+                    lock (pendingResults)
+                    {
+                        pendingResults[requestId] = fallback;
+                    }
+                }
             }
         }
     }

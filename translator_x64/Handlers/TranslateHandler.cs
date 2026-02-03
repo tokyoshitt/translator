@@ -249,7 +249,11 @@ namespace translator_x64.Handlers
                             {
                                 lock (pendingResults)
                                 {
-                                    pendingResults[requestId] = result;
+                                    // Проверяем что ключ еще не существует
+                                    if (!pendingResults.ContainsKey(requestId))
+                                    {
+                                        pendingResults[requestId] = result;
+                                    }
                                 }
                             }
                             return;
@@ -267,7 +271,10 @@ namespace translator_x64.Handlers
                 {
                     lock (pendingResults)
                     {
-                        pendingResults[requestId] = fallback;
+                        if (!pendingResults.ContainsKey(requestId))
+                        {
+                            pendingResults[requestId] = fallback;
+                        }
                     }
                 }
             }
@@ -283,7 +290,10 @@ namespace translator_x64.Handlers
                 {
                     lock (pendingResults)
                     {
-                        pendingResults[requestId] = fallback;
+                        if (!pendingResults.ContainsKey(requestId))
+                        {
+                            pendingResults[requestId] = fallback;
+                        }
                     }
                 }
             }
